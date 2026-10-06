@@ -33,6 +33,8 @@ from model_uos_imr import RangeAngleKinematics
 from model_uos_imr import TrajectoryGenerate
 from math_uos_imr import l2m
 # IMR_P3_T2_IMPORTS: Add feedback-control and frame-transformation imports here
+from model_uos_imr import feedback_control
+from math_uos_imr import Inverse, HomogeneousTransformation
 #----------------------------------------------------------------
 # IMR_P7_T1_IMPORTS: Add the LiDAR and range-angle model imports here.
 # IMR_P7_T2_IMPORTS: Add the GPC classifier imports here.
@@ -120,6 +122,13 @@ class LaptopPilot:
         self.turning_radius = 0.2
         # IMR_P3_T2_CONTROL_PARAMETERS: Define the controller response
         # parameters, motion limits and control-initialisation flag here.
+        self.tau_s = 1.0
+        self.L = 0.3
+
+        self.v_max = 0.2
+        self.w_max = np.deg2rad(30)
+
+        self.initialise_control = True
         # IMR_P3_T3_PARAMETERS: Change the trajectory and control
         # parameters above when investigating parameter sensitivity.
         #----------------------------------------------------------------
@@ -528,7 +537,7 @@ class LaptopPilot:
                 dt
             )
 
-            p_robot[2] = p_robot[2] % (2 * np.pi)
+            p_robot[2] = p_robot[2, 0] % (2 * np.pi)
 
             self.est_pose_northings_m = p_robot[0, 0]
             self.est_pose_eastings_m = p_robot[1, 0]
@@ -554,23 +563,49 @@ class LaptopPilot:
         #-------------- Guided-practicals -------------------------------
         # IMR_P3_T1_SAMPLE_TRAJECTORY: Update waypoint progress and sample
         # the reference pose and feedforward twist at the current elapsed time
-        self.path.wp_progress(
-            self.t,
-            p_robot,
-            self.wp_accept_radius
-        )
+            self.path.wp_progress(
+                self.t,
+                p_robot,
+                self.wp_accept_radius
+            )
 
-        p_ref, u_ref = self.path.p_u_sample(self.t)
-        # p3 task2 controller
-        self.est_pose_northings_m = p_ref[0]
-        self.est_pose_eastings_m = p_ref[1]
-        self.est_pose_yaw_rad = p_ref[2]
+            p_ref, u_ref = self.path.p_u_sample(self.t)
+            # p3 task2 controller
+            self.est_pose_northings_m = p_ref[0, 0]
+            self.est_pose_eastings_m = p_ref[1, 0]
+            self.est_pose_yaw_rad = p_ref[2, 0]
         # IMR_P3_T2_POSE_ERROR: Calculate the difference between the
         # reference and estimated poses, wrap the yaw error and express the
         # pose error in the robot body frame.
+            dp = p_ref - p_robot
+            # 将 yaw rad 设置在 [-π, π) 之间
+            dp[2] = (dp[2] + np.pi) % (2 * np.pi) - np.pi
+
+            # rotate e-frame error into robot body frame
+            H_eb = HomogeneousTransformation(
+                p_robot[0:2], p_robot[2]
+            )
+            ds = Inverse(H_eb.H) @ dp
         # IMR_P3_T2_FEEDBACK_CONTROL: Initialise or update the control
         # gains, calculate the feedback correction and combine it with the
         # feedforward twist.
+
+            # compute control gains
+            self.k_s = 1 / self.tau_s
+            if self.initialise_control == True:
+                self.k_n = 2 * u_ref[0] / (self.L ** 2)
+                self.k_g = u_ref[0] / self.L
+
+                self.initialise_control = False
+
+            # feedback correction
+            du = feedback_control(ds, self.k_s, self.k_n, self.k_g)
+            # feedforward + feedback
+            u = u_ref + du
+
+            # update gains for next iteration
+            self.k_n = 2 * u[0] / (self.L ** 2)
+            self.k_g = u[0] / self.L
         #----------------------------------------------------------------
 
         #-------------- Guided-practicals -------------------------------
@@ -585,6 +620,19 @@ class LaptopPilot:
         # IMR_P3_T2_ACTUATOR_COMMANDS: Limit the commanded linear and
         # angular velocities, convert the resulting twist to wheel rates
         # and store the right and left wheel commands below
+        # ensure within performance limitation
+            if u[0] > self.v_max:
+                u[0] = self.v_max
+
+            if u[0] < -self.v_max:
+                u[0] = -self.v_max
+
+            if u[1] > self.w_max:
+                u[1] = self.w_max
+
+            if u[1] < -self.w_max:
+                u[1] = -self.w_max
+            q = self.ddrive.inv_kinematics(u)
         #----------------------------------------------------------------
         # IMR_P2_T1_WHEEL_COMMANDS: Change the right and left wheel rates
         # here to produce twist, linear and rotational motion.
@@ -594,20 +642,20 @@ class LaptopPilot:
         # the stationary cognition experiments.  
         #----------------------------------------------------------------      
 
-        wheel_speed_msg = Vector3Stamped()
-        wheel_speed_msg.vector.x = 2 * np.pi  # Right wheel 0.5 rev/s = 1*pi rad/s
-        wheel_speed_msg.vector.y = 1 * np.pi  # Left wheel 1 rev/s = 2*pi rad/s
+            wheel_speed_msg = Vector3Stamped()
+            # wheel_speed_msg.vector.x = 2 * np.pi  # Right wheel 0.5 rev/s = 1*pi rad/s
+            # wheel_speed_msg.vector.y = 1 * np.pi  # Left wheel 1 rev/s = 2*pi rad/s
+            wheel_speed_msg.vector.x = q[0, 0]   # Right wheel
+            wheel_speed_msg.vector.y = q[1, 0]   # Left wheel
 
-
-        self.cmd_wheelrate_right = wheel_speed_msg.vector.x
-        self.cmd_wheelrate_left = wheel_speed_msg.vector.y
-
+            self.cmd_wheelrate_right = wheel_speed_msg.vector.x
+            self.cmd_wheelrate_left = wheel_speed_msg.vector.y
         ################################################################################
         # > Act < #
         ################################################################################        
         # Send commands to the robot        
-        if self.stop_flag == False: self.wheel_speed_pub.publish(wheel_speed_msg)
-        self.datalog.log(wheel_speed_msg, topic_name="/wheel_speeds_cmd")
+            if self.stop_flag == False: self.wheel_speed_pub.publish(wheel_speed_msg)
+            self.datalog.log(wheel_speed_msg, topic_name="/wheel_speeds_cmd")
 
 
 
