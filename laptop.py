@@ -87,8 +87,9 @@ class LaptopPilot:
         # lists and specify whether they are relative to the initial position
         #----------------------------------------------------------------
         # path
-        self.northings_path = []
-        self.eastings_path = []        
+        self.northings_path = [0, 1, 1, 2, 2]
+        self.eastings_path = [0, 0, 1, 1, 0]
+        self.relative_path = True
 
         #-------------- Guided-practicals -------------------------------
         # IMR_RF2_T1_ACTUATORS: Set actuation configuration parameters
