@@ -237,7 +237,11 @@ class LaptopPilot:
         # IMR_RF2_T1_LIDAR_INTERPRET: Store and transform LiDAR measurements
         #----------------------------------------------------------------
         # IMR_P2_T2_LIDAR_DISPLAY: Store the LiDAR timestamp and raw
-        # range-angle observations in the attributes used by show_laptop.py   
+        # range-angle observations in the attributes used by show_laptop.py  
+        self.lidar_timestamp_s = msg.header.stamp
+        self.lidar_data = np.zeros((len(msg.ranges), 2))
+        self.lidar_data[:, 0] = msg.ranges
+        self.lidar_data[:, 1] = msg.angles 
         # IMR_P2_T4_LIDAR_TRANSFORM: Replace the raw display data with
         # LiDAR observations transformed into the Earth frame here.
         #----------------------------------------------------------------
