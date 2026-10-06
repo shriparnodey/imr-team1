@@ -407,9 +407,9 @@ class LaptopPilot:
         # below to verify that they are displayed and logged correctly.
 
         # task 2.3
-        # self.est_pose_northings_m = 1 # modify value
-        # self.est_pose_eastings_m = 2 # modify value
-        # self.est_pose_yaw_rad = np.deg2rad(45) # modify value
+        self.est_pose_northings_m = 1 # modify value
+        self.est_pose_eastings_m = 2 # modify value
+        self.est_pose_yaw_rad = np.deg2rad(45) # modify value
         #---------------------------------------------------------------- 
         # IMR_P2_T3_MOTION_MODEL: Once the pose is initialised, convert the
         # measured wheel rates to robot twist, calculate the timestep and
