@@ -27,6 +27,7 @@ from zeroros.rate import Rate
 from model_uos_imr import ActuatorConfiguration, rigid_body_kinematics
 from math_uos_imr import Vector
 # IMR_P2_T4_IMPORTS: Add the LiDAR observation-model and Vector imports here
+from model_uos_imr import RangeAngleKinematics
 #----------------------------------------------------------------
 # IMR_P3_T1_IMPORTS: Add trajectory-generation imports here
 # IMR_P3_T2_IMPORTS: Add feedback-control and frame-transformation imports here
@@ -150,6 +151,13 @@ class LaptopPilot:
         #----------------------------------------------------------------
         # IMR_P2_T4_LIDAR_MODEL: Define the LiDAR position and create the
         # range-angle observation model here
+        lidar_xb = 0
+        lidar_yb = 0
+
+        self.lidar = RangeAngleKinematics(
+            lidar_xb,
+            lidar_yb,
+        )
         #----------------------------------------------------------------
         
         ###############################################################
@@ -250,9 +258,29 @@ class LaptopPilot:
         # IMR_P2_T2_LIDAR_DISPLAY: Store the LiDAR timestamp and raw
         # range-angle observations in the attributes used by show_laptop.py  
         self.lidar_timestamp_s = msg.header.stamp
+
+        # robot pose in e-frame
+        # lidar_data 应该放的是相对于环境的坐标，要通过 range_angle_to_loc 进行修改，
+        # 所以要先知道机器人的位置 和 landmark 的极坐标
+        p_eb = Vector(3)
+        p_eb[0] = self.est_pose_northings_m
+        p_eb[1] = self.est_pose_eastings_m
+        p_eb[2] = self.est_pose_yaw_rad
+
+        # transformed LiDAR points in e-frame
         self.lidar_data = np.zeros((len(msg.ranges), 2))
-        self.lidar_data[:, 0] = msg.ranges
-        self.lidar_data[:, 1] = msg.angles 
+        z_lm = Vector(2)
+
+        for i in range(len(msg.ranges)):
+            z_lm[0] = msg.ranges[i]
+            z_lm[1] = msg.angles[i]
+
+            t_em = self.lidar.rangeangle_to_loc(p_eb, z_lm)
+
+            self.lidar_data[i, 0] = t_em[0]
+            self.lidar_data[i, 1] = t_em[1]
+
+        self.lidar_data = self.lidar_data[~np.isnan(self.lidar_data).any(axis=1)]
         # IMR_P2_T4_LIDAR_TRANSFORM: Replace the raw display data with
         # LiDAR observations transformed into the Earth frame here.
         #----------------------------------------------------------------
