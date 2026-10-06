@@ -24,6 +24,8 @@ from zeroros.rate import Rate
 # IMR_RF2_T3_IMPORTS: Add the forward-clearance and braking imports here
 #----------------------------------------------------------------
 # IMR_P2_T3_IMPORTS: Add the motion-model imports here
+from model_uos_imr import ActuatorConfiguration, rigid_body_kinematics
+from math_uos_imr import Vector
 # IMR_P2_T4_IMPORTS: Add the LiDAR observation-model and Vector imports here
 #----------------------------------------------------------------
 # IMR_P3_T1_IMPORTS: Add trajectory-generation imports here
@@ -95,6 +97,15 @@ class LaptopPilot:
         #----------------------------------------------------------------
         # IMR_P2_T3_INITIALISATION: Add the pose-initialisation flag here
         # IMR_P2_T3_ACTUATOR_MODEL: Define the wheel geometry and create
+        self.initialise_pose = True
+
+        wheel_distance = 0.081
+        wheel_diameter = 0.074
+
+        self.ddrive = ActuatorConfiguration(
+            wheel_distance,
+            wheel_diameter
+        )
         # the differential-drive actuator model here.
         #----------------------------------------------------------------
         # IMR_P3_T1_TRAJECTORY_PARAMETERS: Define the velocity,
@@ -377,6 +388,17 @@ class LaptopPilot:
             #-------------- Guided-practicals -------------------------------
             # IMR_RF2_T1_INITIAL_POSE: On the first ArUco measurement, initialise
             # the estimated pose and motion-model timing here
+            if self.initialise_pose == True:
+                self.est_pose_northings_m = self.measured_pose_northings_m
+                self.est_pose_eastings_m = self.measured_pose_eastings_m
+                self.est_pose_yaw_rad = self.measured_pose_yaw_rad
+
+                self.t_prev = datetime.utcnow().timestamp()
+                self.t = 0
+
+                time.sleep(0.1)
+
+                self.initialise_pose = False
             #----------------------------------------------------------------
             # IMR_P2_T3_INITIAL_POSE: On the first ArUco measurement, initialise
             # the estimated pose and motion-model timing here
@@ -411,22 +433,55 @@ class LaptopPilot:
         # below to verify that they are displayed and logged correctly.
 
         # task 2.3
-        self.est_pose_northings_m = 1 # modify value
-        self.est_pose_eastings_m = 2 # modify value
-        self.est_pose_yaw_rad = np.deg2rad(45) # modify value
+        # self.est_pose_northings_m = 1 # modify value
+        # self.est_pose_eastings_m = 2 # modify value
+        # self.est_pose_yaw_rad = np.deg2rad(45) # modify value
         #---------------------------------------------------------------- 
         # IMR_P2_T3_MOTION_MODEL: Once the pose is initialised, convert the
         # measured wheel rates to robot twist, calculate the timestep and
         # propagate the previous pose estimate here. Keep the estimate logging
         # and subsequent Act section inside the initialisation conditional.
+        if self.initialise_pose != True:
+            q = Vector(2)
+
+            if self.measured_wheelrate_right is not None:
+                q[0] = self.measured_wheelrate_right
+
+            if self.measured_wheelrate_left is not None:
+                q[1] = self.measured_wheelrate_left
+
+            u = self.ddrive.fwd_kinematics(q)
+            t_now = datetime.utcnow().timestamp()
+
+            # 计算 timestamp
+            dt = t_now - self.t_prev
+            self.t += dt
+            self.t_prev = t_now
+            p_robot = Vector(3)
+
+            p_robot[0] = self.est_pose_northings_m
+            p_robot[1] = self.est_pose_eastings_m
+            p_robot[2] = self.est_pose_yaw_rad
+
+            p_robot = rigid_body_kinematics(
+                p_robot,
+                u,
+                dt
+            )
+
+            p_robot[2] = p_robot[2] % (2 * np.pi)
+
+            self.est_pose_northings_m = p_robot[0, 0]
+            self.est_pose_eastings_m = p_robot[1, 0]
+            self.est_pose_yaw_rad = p_robot[2, 0]
         #----------------------------------------------------------------
 
-        msg = self.pose_parse([datetime.utcnow().timestamp(),
+            msg = self.pose_parse([datetime.utcnow().timestamp(),
                                self.est_pose_northings_m,
                                self.est_pose_eastings_m,
                                0,0,0,
                                self.est_pose_yaw_rad])
-        self.datalog.log(msg, topic_name="/est_pose")
+            self.datalog.log(msg, topic_name="/est_pose")
 
         #-------------- Guided-practicals -------------------------------
         # IMR_RF2_T2_FREESPACE_CALC: Determine freespace direction
