@@ -30,6 +30,8 @@ from math_uos_imr import Vector
 from model_uos_imr import RangeAngleKinematics
 #----------------------------------------------------------------
 # IMR_P3_T1_IMPORTS: Add trajectory-generation imports here
+from model_uos_imr import TrajectoryGenerate
+from math_uos_imr import l2m
 # IMR_P3_T2_IMPORTS: Add feedback-control and frame-transformation imports here
 #----------------------------------------------------------------
 # IMR_P7_T1_IMPORTS: Add the LiDAR and range-angle model imports here.
@@ -112,6 +114,10 @@ class LaptopPilot:
         #----------------------------------------------------------------
         # IMR_P3_T1_TRAJECTORY_PARAMETERS: Define the velocity,
         # acceleration, waypoint acceptance radius and turning radius here.
+        self.v_traj = 0.1
+        self.a_traj = 0.1
+        self.wp_accept_radius = 0.1
+        self.turning_radius = 0.2
         # IMR_P3_T2_CONTROL_PARAMETERS: Define the controller response
         # parameters, motion limits and control-initialisation flag here.
         # IMR_P3_T3_PARAMETERS: Change the trajectory and control
@@ -365,6 +371,28 @@ class LaptopPilot:
     #   1. offset relative waypoints by the initial robot position;
     #   2. create a trajectory from the waypoint lists; and
     #   3. apply the chosen trajectory parameters.
+    def generate_trajectory(self):
+        # 如果是相对路径
+        if self.relative_path == True:
+            for i in range(len(self.northings_path)):
+                self.northings_path[i] += self.est_pose_northings_m
+                self.eastings_path[i] += self.est_pose_eastings_m
+        C = l2m([
+            self.northings_path,
+            self.eastings_path
+        ])
+        self.path = TrajectoryGenerate(
+            C[:, 0],
+            C[:, 1]
+        )
+        self.path.path_to_trajectory(
+            self.v_traj,
+            self.a_traj
+        )
+        self.path.turning_arcs(
+            self.turning_radius
+        )
+        self.path.wp_id = 0
     #----------------------------------------------------------------    
 
 
@@ -424,6 +452,8 @@ class LaptopPilot:
 
                 self.t_prev = datetime.utcnow().timestamp()
                 self.t = 0
+                
+                self.generate_trajectory()
 
                 time.sleep(0.1)
 
@@ -524,6 +554,17 @@ class LaptopPilot:
         #-------------- Guided-practicals -------------------------------
         # IMR_P3_T1_SAMPLE_TRAJECTORY: Update waypoint progress and sample
         # the reference pose and feedforward twist at the current elapsed time
+        self.path.wp_progress(
+            self.t,
+            p_robot,
+            self.wp_accept_radius
+        )
+
+        p_ref, u_ref = self.path.p_u_sample(self.t)
+        # p3 task2 controller
+        self.est_pose_northings_m = p_ref[0]
+        self.est_pose_eastings_m = p_ref[1]
+        self.est_pose_yaw_rad = p_ref[2]
         # IMR_P3_T2_POSE_ERROR: Calculate the difference between the
         # reference and estimated poses, wrap the yaw error and express the
         # pose error in the robot body frame.
